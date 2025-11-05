@@ -1,0 +1,696 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Secure File Transfer — AES‑GCM v2</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <script defer src="https://unpkg.com/lucide@latest"></script>
+  <style>
+    :root{--bg: #0b0f17; --card:#111827; --muted:#9CA3AF; --acc:#60A5FA; --acc2:#34D399;}
+    html,body{height:100%}
+    body{font-family:Inter, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, Noto Sans, 'Apple Color Emoji','Segoe UI Emoji'; background: radial-gradient(1200px 800px at 80% -10%, rgba(59,130,246,0.25), transparent), radial-gradient(1000px 600px at -10% 20%, rgba(16,185,129,0.25), transparent), var(--bg);}    
+    .glass{background: linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.03)); backdrop-filter: blur(10px); border:1px solid rgba(255,255,255,0.08)}
+    .btn{transition: all .2s ease;}
+    .btn:hover{transform: translateY(-1px)}
+    .dropzone{border:2px dashed rgba(255,255,255,0.12)}
+    .dropzone.dragover{border-color: #60A5FA; background: rgba(59,130,246,0.08)}
+    .spin{animation: spin 1s linear infinite}
+    @keyframes spin{to{transform:rotate(360deg)}}
+    .fade-in{animation: fade-in .35s ease both}
+    @keyframes fade-in{from{opacity:0;transform:translateY(6px)} to{opacity:1;transform:none}}
+    .mono{font-variant-numeric: tabular-nums; font-feature-settings: "tnum" 1}
+    .strength-0{background:#ef4444}
+    .strength-1{background:#f59e0b}
+    .strength-2{background:#84cc16}
+    .strength-3{background:#22c55e}
+    #qr-wrap canvas{image-rendering: pixelated}
+    #spec-canvas{width:100%; height:180px; background: rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); border-radius: 0.75rem}
+  </style>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jsqr/1.4.0/jsQR.min.js"></script>
+</head>
+<body class="text-slate-100">
+  <header class="max-w-5xl mx-auto px-6 pt-10 pb-6">
+    <div class="flex items-center gap-3">
+      <div class="h-10 w-10 rounded-2xl grid place-items-center bg-gradient-to-br from-blue-500 to-emerald-400 shadow-lg shadow-blue-500/20">
+        <i data-lucide="shield" class="w-5 h-5"></i>
+      </div>
+      <div>
+        <h1 class="text-2xl md:text-3xl font-extrabold tracking-tight">Secure File Transfer — v2</h1>
+        <p class="text-sm text-slate-400">Client‑side AES‑256‑GCM • PBKDF2‑SHA‑256 • Header bound as AAD • Optional keyfile • GZIP‑before‑encrypt</p>
+      </div>
+    </div>
+  </header>
+
+  <main class="max-w-5xl mx-auto px-6 pb-24">
+    <!-- Tabs -->
+    <div class="glass rounded-3xl p-2 mb-6">
+      <div class="grid grid-cols-2 gap-2 text-sm">
+        <button id="tab-encrypt" class="btn rounded-2xl py-3 font-semibold bg-blue-500/20 hover:bg-blue-500/25 border border-blue-400/30">Encrypt</button>
+        <button id="tab-decrypt" class="btn rounded-2xl py-3 font-semibold hover:bg-emerald-500/20 border border-emerald-400/30">Decrypt</button>
+      </div>
+    </div>
+
+    <!-- Panels -->
+    <section id="panel-encrypt" class="fade-in">
+      <div class="grid md:grid-cols-5 gap-6">
+        <div class="md:col-span-3 glass rounded-3xl p-6">
+          <h2 class="text-lg font-bold mb-2">Encrypt a file</h2>
+          <p class="text-slate-400 text-sm mb-4">Now with authenticated headers (AES‑GCM AAD), optional GZIP compression, and support for an extra <span class="font-semibold">keyfile</span>.</p>
+
+          <div id="enc-drop" class="dropzone rounded-2xl p-6 grid place-items-center text-slate-300 text-sm">
+            <div class="text-center pointer-events-none select-none">
+              <i data-lucide="upload" class="w-6 h-6 mx-auto mb-2"></i>
+              <p><span class="font-semibold">Drop a file</span> here or click to browse</p>
+              <p id="enc-file-label" class="text-slate-500 text-xs mt-1">No file selected</p>
+            </div>
+            <input id="enc-file" type="file" class="hidden" />
+          </div>
+
+          <div class="mt-5 grid md:grid-cols-2 gap-4">
+            <div>
+              <label class="text-xs text-slate-400">Password</label>
+              <input id="enc-pass" type="password" class="w-full mt-1 bg-slate-800/60 border border-white/10 rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Enter a strong password" />
+              <div class="mt-2 h-1 w-full bg-white/10 rounded">
+                <div id="pw-strength" class="h-1 w-0 rounded strength-0 transition-all"></div>
+              </div>
+              <p id="pw-hint" class="text-xs text-slate-500 mt-1">Use 12+ chars with mixed classes.</p>
+            </div>
+            <div>
+              <label class="text-xs text-slate-400">Confirm password</label>
+              <input id="enc-pass2" type="password" class="w-full mt-1 bg-slate-800/60 border border-white/10 rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Re‑enter password" />
+              <div class="mt-3">
+                <label class="text-xs text-slate-400">Optional keyfile</label>
+                <input id="enc-keyfile" type="file" class="w-full mt-1 text-xs" />
+                <p class="text-[11px] text-slate-500">Combines with your password for 2‑factor style protection.</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="mt-5 grid md:grid-cols-3 gap-4">
+            <div>
+              <label class="text-xs text-slate-400">PBKDF2 iterations</label>
+              <input id="enc-iters" type="number" min="120000" step="1000" value="310000" class="w-full mt-1 bg-slate-800/60 border border-white/10 rounded-xl px-3 py-2 focus:outline-none" />
+              <p class="text-[11px] text-slate-500 mt-1">Higher = slower & stronger</p>
+            </div>
+            <div class="flex items-end gap-3">
+              <label class="inline-flex items-center gap-2 text-xs"><input id="opt-compress" type="checkbox" class="accent-blue-500" checked><span>GZIP before encrypt</span></label>
+            </div>
+            <div class="flex items-end gap-3">
+              <label class="inline-flex items-center gap-2 text-xs"><input id="opt-embedmeta" type="checkbox" class="accent-blue-500"><span>Embed original filename & MIME</span></label>
+            </div>
+          </div>
+
+          <div class="mt-6 flex flex-wrap items-center gap-3">
+            <button id="btn-scan-qr"$1hidden btn inline-flex items-center gap-2 rounded-xl bg-slate-700 px-4 py-2.5 font-semibold text-white border border-white/10">
+              <i data-lucide="scan"></i><span>Scan Header QR</span>
+            </button>
+            <button id="enc-btn" class="btn inline-flex items-center gap-2 rounded-xl bg-blue-500 px-4 py-2.5 font-semibold text-white shadow-lg shadow-blue-500/20">
+              <i data-lucide="lock"></i><span>Encrypt & Download</span>
+            </button>
+            <span id="enc-status" class="text-slate-400 text-sm"></span>
+          </div>
+
+          <div class="mt-4">
+            <div class="h-2 w-full bg-white/10 rounded-full overflow-hidden">
+              <div id="enc-progress" class="h-full w-0 bg-gradient-to-r from-blue-500 to-emerald-400 transition-all"></div>
+            </div>
+            <p id="enc-meta" class="mt-2 text-xs text-slate-400 mono"></p>
+
+            <div id="share-card" class="hidden mt-3 rounded-xl bg-slate-900/60 border border-white/10 p-3 text-[11px] text-slate-400">
+              <div class="flex items-center gap-2 mb-1"><i data-lucide="key" class="w-3.5 h-3.5"></i><span class="font-semibold text-slate-200">Share card (header)</span></div>
+              <pre id="share-json" class="overflow-auto"></pre>
+              <div class="mt-2 flex items-center gap-2">
+                <button id="btn-qr" class="btn inline-flex items-center gap-2 rounded bg-slate-800/80 px-3 py-1.5 border border-white/10"><i data-lucide="qr-code"></i><span>Show QR</span></button>
+                <button id="btn-qr-dl" class="btn inline-flex items-center gap-2 rounded bg-slate-800/80 px-3 py-1.5 border border-white/10" disabled><i data-lucide="download"></i><span>Download PNG</span></button>
+              </div>
+              <div id="qr-wrap" class="mt-3 hidden grid place-items-center p-3 rounded-lg bg-black/30"></div>
+            </div>
+          </div>
+        </div>
+
+        <aside class="md:col-span-2 glass rounded-3xl p-6">
+          <h3 class="font-semibold mb-2">Format & security upgrades</h3>
+          <pre class="bg-slate-900/60 rounded-xl p-4 text-xs overflow-auto"><code>struct SFT {
+  char[4] magic = "SFT2";        // version bump
+  uint32  headerLen;             // BE length of JSON header
+  bytes   header;                // UTF‑8 JSON (used as GCM AAD)
+  bytes   ciphertext;            // AES‑GCM output (tag appended)
+}
+// header fields (subset)
+// v, format, algo, kdf, iters, saltB64, ivB64,
+// size, compressed, usesKeyfile,
+// originalName?, mime?
+//
+// 🔒 Header is bound as AES‑GCM additionalData,
+//    so any tampering breaks decryption.
+</code></pre>
+          <ul class="text-sm text-slate-400 mt-4 list-disc pl-5 space-y-1">
+            <li>Header authenticated via <span class="font-semibold">AES‑GCM AAD</span>.</li>
+            <li>Optional <span class="font-semibold">keyfile</span> mixed into KDF input.</li>
+            <li>Optional <span class="font-semibold">GZIP</span> before encrypt (better privacy & size).</li>
+            <li>Metadata embed is opt‑in to avoid filename leaks.</li>
+          </ul>
+        </aside>
+      </div>
+    </section>
+
+    <section id="panel-decrypt" class="hidden">
+      <div class="grid md:grid-cols-5 gap-6">
+        <div class="md:col-span-3 glass rounded-3xl p-6">
+          <h2 class="text-lg font-bold mb-2">Decrypt a .sft file</h2>
+          <p class="text-slate-400 text-sm mb-4">Provide the file, password, and the same keyfile (if used). Header is authenticated as AAD.</p>
+
+          <div id="dec-drop" class="dropzone rounded-2xl p-6 grid place-items-center text-slate-300 text-sm">
+            <div class="text-center pointer-events-none select-none">
+              <i data-lucide="file-lock" class="w-6 h-6 mx-auto mb-2"></i>
+              <p><span class="font-semibold">Drop .sft file</span> here or click to browse</p>
+              <p id="dec-file-label" class="text-slate-500 text-xs mt-1">No file selected</p>
+            </div>
+            <input id="dec-file" type="file" accept=".sft" class="hidden" />
+          </div>
+
+          <div class="mt-5 grid md:grid-cols-2 gap-4">
+            <div>
+              <label class="text-xs text-slate-400">Password</label>
+              <input id="dec-pass" type="password" class="w-full mt-1 bg-slate-800/60 border border-white/10 rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-500" placeholder="Enter password used for encryption" />
+              <div class="mt-3">
+                <label class="text-xs text-slate-400">Keyfile (if used)</label>
+                <input id="dec-keyfile" type="file" class="w-full mt-1 text-xs" />
+              </div>
+            </div>
+            <div class="text-xs text-slate-500 flex items-end">If any of password / keyfile / file mismatch → auth fails.</div>
+          </div>
+
+          <div class="mt-6 flex flex-wrap items-center gap-3">
+            <button id="dec-btn"$1
+            <button id="btn-scan-qr-decrypt" class="btn inline-flex items-center gap-2 rounded-xl bg-slate-700 px-4 py-2.5 font-semibold text-white border border-white/10"><i data-lucide="scan"></i><span>Scan Header QR</span></button>
+            <span id="dec-status" class="text-slate-400 text-sm"></span>
+          </div>
+
+          <div class="mt-4">
+            <div class="h-2 w-full bg-white/10 rounded-full overflow-hidden">
+              <div id="dec-progress" class="h-full w-0 bg-gradient-to-r from-emerald-500 to-blue-500 transition-all"></div>
+            </div>
+            <p id="dec-meta" class="mt-2 text-xs text-slate-400 mono"></p>
+          </div>
+
+          <div id="audio-ui" class="mt-4 hidden">
+            <h4 class="text-sm font-semibold mb-2 flex items-center gap-2"><i data-lucide="audio-lines" class="w-4 h-4"></i><span>Audio preview</span></h4>
+            <audio id="audio-player" controls class="w-full mb-3"></audio>
+            <canvas id="spec-canvas" height="180"></canvas>
+            <p class="text-[11px] text-slate-500 mt-1">Live spectrogram (client‑side WebAudio). Visual only — your file never leaves the device.</p>
+          </div>
+        </div>
+
+        <aside class="md:col-span-2 glass rounded-3xl p-6">
+          <h3 class="font-semibold mb-2">Tips</h3>
+          <ul class="text-sm text-slate-400 space-y-2">
+            <li>Use a unique, strong password for each file.</li>
+            <li>Keep the <span class="font-semibold text-slate-200">.sft</span> safe; it cannot be recovered without the secret(s).</li>
+            <li>If you used a keyfile during encryption, you must supply the same file to decrypt.</li>
+          </ul>
+        </aside>
+      </div>
+    </section>
+  </main>
+
+  <footer class="max-w-5xl mx-auto px-6 pb-12 text-xs text-slate-500">
+    <p>Built with Web Crypto API. Header bound as AES‑GCM AAD. No data leaves your device until you download or share the encrypted file.</p>
+  </footer>
+
+  <!-- QR Scan Modal -->
+  <div id="qr-modal" class="fixed inset-0 bg-black/70 hidden items-center justify-center z-50">
+    <div class="glass rounded-3xl p-6 w-[90%] max-w-md text-center">
+      <h3 class="font-semibold mb-3 text-slate-200">Scan Header QR</h3>
+      <video id="qr-video" autoplay playsinline class="w-full rounded-xl mb-3"></video>
+      <button id="close-qr" class="btn rounded-xl bg-slate-800 px-4 py-2 border border-white/10 text-slate-300">Close</button>
+    </div>
+  </div>
+
+  <script>
+    // ---------------------- Helpers ----------------------
+    const $ = (sel) => document.querySelector(sel);
+    const enc = new TextEncoder();
+    const dec = new TextDecoder();
+
+    function toB64(arrBuf){
+      const bytes = new Uint8Array(arrBuf);
+      let bin = '';
+      for(let i=0;i<bytes.length;i++) bin += String.fromCharCode(bytes[i]);
+      return btoa(bin);
+    }
+    function fromB64(b64){
+      const bin = atob(b64);
+      const bytes = new Uint8Array(bin.length);
+      for(let i=0;i<bin.length;i++) bytes[i] = bin.charCodeAt(i);
+      return bytes.buffer;
+    }
+    function u32be(num){
+      const b = new Uint8Array(4);
+      b[0]=(num>>>24)&255; b[1]=(num>>>16)&255; b[2]=(num>>>8)&255; b[3]=num&255; return b;
+    }
+    function readU32be(view, offset){
+      return (view.getUint8(offset)<<24) | (view.getUint8(offset+1)<<16) | (view.getUint8(offset+2)<<8) | view.getUint8(offset+3);
+    }
+    function fmtBytes(n){
+      if(n<1024) return `${n} B`; if(n<1024**2) return `${(n/1024).toFixed(2)} KB`; if(n<1024**3) return `${(n/1024**2).toFixed(2)} MB`; return `${(n/1024**3).toFixed(2)} GB`;
+    }
+
+    // Simple password strength estimation (client-side only)
+    function strength(p){
+      let s = 0;
+      if(!p) return 0;
+      if(p.length >= 12) s++;
+      if(/[a-z]/.test(p) && /[A-Z]/.test(p)) s++;
+      if(/[0-9]/.test(p)) s++;
+      if(/[^A-Za-z0-9]/.test(p)) s++;
+      return Math.min(3, s);
+    }
+
+    async function mixKeyMaterial(password, keyfileBytes){
+      // Combine password bytes and keyfile bytes for PBKDF2 import
+      const pwdBytes = enc.encode(password || '');
+      if(keyfileBytes && keyfileBytes.byteLength){
+        const mix = new Uint8Array(pwdBytes.length + keyfileBytes.byteLength);
+        mix.set(pwdBytes, 0);
+        mix.set(new Uint8Array(keyfileBytes), pwdBytes.length);
+        return crypto.subtle.importKey('raw', mix, 'PBKDF2', false, ['deriveKey']);
+      }
+      return crypto.subtle.importKey('raw', pwdBytes, 'PBKDF2', false, ['deriveKey']);
+    }
+
+    async function deriveKey(baseKey, salt, iterations){
+      return crypto.subtle.deriveKey(
+        { name: 'PBKDF2', salt, iterations, hash: 'SHA-256' },
+        baseKey,
+        { name: 'AES-GCM', length: 256 },
+        false,
+        ['encrypt','decrypt']
+      );
+    }
+
+    async function gzipIfEnabled(buf){
+      if(!$('#opt-compress').checked || !('CompressionStream' in window)) return {buf, compressed:false};
+      const stream = new Blob([buf]).stream().pipeThrough(new CompressionStream('gzip'));
+      const gz = await new Response(stream).arrayBuffer();
+      return {buf: gz, compressed: true};
+    }
+
+    function downloadBlob(blob, filename){
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(()=>URL.revokeObjectURL(a.href), 2000);
+    }
+
+    function wipe(...arrs){
+      for(const a of arrs){
+        if(!a) continue;
+        if(a instanceof ArrayBuffer) new Uint8Array(a).fill(0);
+        else if(a.buffer) new Uint8Array(a.buffer).fill(0);
+      }
+    }
+
+    // ---------------------- Encrypt ----------------------
+    let encFile = null;
+    const encDrop = $('#enc-drop');
+    const encInput = $('#enc-file');
+    encDrop.addEventListener('click', ()=> encInput.click());
+    encInput.addEventListener('change', (e)=>{
+      encFile = e.target.files[0] || null; $('#enc-file-label').textContent = encFile? `${encFile.name} • ${fmtBytes(encFile.size)}` : 'No file selected';
+    });
+    function wireDropzone(zone, setFile, labelSel){
+      zone.addEventListener('dragover', e=>{e.preventDefault(); zone.classList.add('dragover');});
+      zone.addEventListener('dragleave', ()=> zone.classList.remove('dragover'));
+      zone.addEventListener('drop', e=>{e.preventDefault(); zone.classList.remove('dragover'); const f=e.dataTransfer.files[0]; if(f){ setFile(f); $(labelSel).textContent = `${f.name} • ${fmtBytes(f.size)}`; }});
+    }
+    wireDropzone(encDrop, f=>encFile=f, '#enc-file-label');
+
+    $('#enc-pass').addEventListener('input', (e)=>{
+      const s = strength(e.target.value);
+      const bar = $('#pw-strength');
+      bar.style.width = `${(s+1)*25}%`;
+      bar.className = `h-1 rounded strength-${s} transition-all`;
+      $('#pw-hint').textContent = [
+        'Very weak — add length & variety',
+        'Weak — add numbers/symbols',
+        'Okay — longer is better',
+        'Strong — looks good'
+      ][s];
+    });
+
+    async function encryptFile(){
+      const p1 = $('#enc-pass').value; const p2 = $('#enc-pass2').value; const iters = parseInt($('#enc-iters').value || '310000', 10);
+      $('#enc-status').textContent=''; $('#enc-meta').textContent=''; $('#share-card').classList.add('hidden');
+      if(!encFile) return $('#enc-status').textContent='Select a file first';
+      if(!p1) return $('#enc-status').textContent='Enter a password';
+      if(p1!==p2) return $('#enc-status').textContent='Passwords do not match';
+      $('#enc-btn').disabled = true; $('#enc-status').innerHTML = '<span class="inline-flex items-center gap-1"><span class="spin inline-block w-4 h-4 border-2 border-white/30 border-t-white rounded-full"></span> Encrypting…</span>';
+      $('#enc-progress').style.width='8%';
+      let keyfileBytes = null; let fileBuf = null; let comp = {buf:null, compressed:false};
+      try{
+        fileBuf = await encFile.arrayBuffer();
+        $('#enc-progress').style.width='30%';
+        comp = await gzipIfEnabled(fileBuf);
+        $('#enc-progress').style.width='45%';
+        const salt = crypto.getRandomValues(new Uint8Array(16));
+        const iv   = crypto.getRandomValues(new Uint8Array(12));
+
+        const keyfile = $('#enc-keyfile').files[0];
+        if(keyfile) keyfileBytes = await keyfile.arrayBuffer();
+        const baseKey = await mixKeyMaterial(p1, keyfileBytes);
+        const key  = await deriveKey(baseKey, salt, iters);
+
+        const header = {
+          v: 2,
+          format: 'SFT2',
+          algo: 'AES-256-GCM',
+          kdf: 'PBKDF2-SHA-256',
+          iters: iters,
+          saltB64: toB64(salt),
+          ivB64: toB64(iv),
+          size: comp.buf.byteLength,
+          compressed: comp.compressed,
+          usesKeyfile: !!keyfile,
+        };
+        if($('#opt-embedmeta').checked){
+          header.originalName = encFile.name;
+          header.mime = encFile.type || 'application/octet-stream';
+        }
+        const headerBytes = enc.encode(JSON.stringify(header));
+        const ciphertext = await crypto.subtle.encrypt({name:'AES-GCM', iv, additionalData: headerBytes}, key, comp.buf);
+
+        const magic = enc.encode('SFT2');
+        const len = u32be(headerBytes.length);
+        const out = new Uint8Array(4 + 4 + headerBytes.length + ciphertext.byteLength);
+        out.set(magic, 0); out.set(len, 4); out.set(headerBytes, 8); out.set(new Uint8Array(ciphertext), 8 + headerBytes.length);
+
+        $('#enc-progress').style.width='85%';
+        const blob = new Blob([out], {type:'application/octet-stream'});
+        downloadBlob(blob, (encFile.name || 'file') + '.sft');
+        $('#enc-progress').style.width='100%';
+        $('#enc-status').textContent = 'Done. File downloaded.';
+        $('#enc-meta').textContent = `AES-256-GCM • PBKDF2 iters: ${header.iters} • salt: ${header.saltB64.slice(0,8)}… • iv: ${header.ivB64.slice(0,8)}… • compressed: ${header.compressed}`;
+
+        // Share card + QR: header JSON (no secrets)
+        const headerStr = JSON.stringify(header, null, 2);
+        $('#share-json').textContent = headerStr;
+        $('#share-card').classList.remove('hidden');
+        lastHeaderJSON = JSON.stringify(header); // compact for QR
+        const wrap = document.getElementById('qr-wrap');
+        wrap.classList.add('hidden');
+        const dlBtn = document.getElementById('btn-qr-dl');
+        if(dlBtn) dlBtn.disabled = true;
+
+      }catch(err){
+        console.error(err); $('#enc-status').textContent = `Error: ${err.message || err}`;
+      }finally{
+        setTimeout(()=>{ $('#enc-progress').style.width='0%'; }, 600);
+        $('#enc-btn').disabled = false;
+        // Best-effort wipe
+        wipe(fileBuf, keyfileBytes);
+      }
+    }
+
+    // ---------------------- Decrypt ----------------------
+    let decFile = null;
+    const decDrop = $('#dec-drop');
+    const decInput = $('#dec-file');
+    decDrop.addEventListener('click', ()=> decInput.click());
+    decInput.addEventListener('change', (e)=>{
+      decFile = e.target.files[0] || null; $('#dec-file-label').textContent = decFile? `${decFile.name} • ${fmtBytes(decFile.size)}` : 'No file selected';
+    });
+    wireDropzone(decDrop, f=>decFile=f, '#dec-file-label');
+
+    async function decryptFile(){
+      const pass = $('#dec-pass').value; $('#dec-status').textContent=''; $('#dec-meta').textContent='';
+      if(!decFile) return $('#dec-status').textContent='Select a .sft file first';
+      if(!pass && !$('#dec-keyfile').files[0]) return $('#dec-status').textContent='Enter password or provide keyfile (or both)';
+      $('#dec-btn').disabled = true; $('#dec-status').innerHTML = '<span class="inline-flex items-center gap-1"><span class="spin inline-block w-4 h-4 border-2 border-white/30 border-t-white rounded-full"></span> Decrypting…</span>';
+      $('#dec-progress').style.width='10%';
+
+      let sftBuf = null; let keyfileBytes = null;
+      try{
+        sftBuf = await decFile.arrayBuffer();
+        $('#dec-progress').style.width='30%';
+        const view = new DataView(sftBuf);
+        const magic = dec.decode(new Uint8Array(sftBuf.slice(0,4)));
+        if(magic !== 'SFT2' && magic !== 'SFT1') throw new Error('Invalid file format');
+        const headerLen = readU32be(view, 4);
+        const headerBytes = new Uint8Array(sftBuf.slice(8, 8 + headerLen));
+        let meta; try { meta = JSON.parse(dec.decode(headerBytes)); } catch{ throw new Error('Corrupted header JSON'); }
+        $('#dec-progress').style.width='45%';
+        if(window._scannedHeader){
+          const h = window._scannedHeader; let mismatch = false;
+          if(h.ivB64 && h.ivB64 !== meta.ivB64) mismatch = true;
+          if(h.saltB64 && h.saltB64 !== meta.saltB64) mismatch = true;
+          if(typeof h.iters === 'number' && h.iters !== meta.iters) mismatch = true;
+          if('compressed' in h && !!h.compressed !== !!meta.compressed) mismatch = true;
+          if('usesKeyfile' in h && !!h.usesKeyfile !== !!meta.usesKeyfile) mismatch = true;
+          document.getElementById('dec-status').textContent = mismatch ? 'Warning: header differs from scanned QR' : 'Header matches QR ✅';
+        }
+
+        const salt = new Uint8Array(fromB64(meta.saltB64));
+        const iv   = new Uint8Array(fromB64(meta.ivB64));
+        const ciphertext = sftBuf.slice(8 + headerLen);
+
+        const keyfile = $('#dec-keyfile').files[0];
+        if(keyfile) keyfileBytes = await keyfile.arrayBuffer();
+        const baseKey = await mixKeyMaterial(pass, keyfileBytes);
+        const key  = await deriveKey(baseKey, salt, meta.iters || 310000);
+
+        // Use header as AAD if v2; for v1, no AAD
+        const aad = (magic === 'SFT2') ? headerBytes : undefined;
+        const plaintext = await crypto.subtle.decrypt({name:'AES-GCM', iv, additionalData: aad}, key, ciphertext);
+
+        $('#dec-progress').style.width='85%';
+        let outBuf = plaintext;
+        if(meta.compressed && 'DecompressionStream' in window){
+          const stream = new Blob([plaintext]).stream().pipeThrough(new DecompressionStream('gzip'));
+          outBuf = await new Response(stream).arrayBuffer();
+        }
+
+        const outName = meta.originalName ? meta.originalName : (decFile.name.replace(/\.sft$/, '') + '.decrypted');
+        const mime = meta.mime || 'application/octet-stream';
+        const outBlob = new Blob([outBuf], {type: mime});
+        downloadBlob(outBlob, outName);
+
+        // If audio, show preview + spectrogram
+        const looksAudio = (mime.startsWith('audio/') || /\.(mp3|wav|m4a|ogg|flac)$/i.test(outName));
+        if(looksAudio){
+          try{ showAudioPreview(outBlob); }catch(_){}
+        }
+        $('#dec-progress').style.width='100%';
+        $('#dec-status').textContent = 'Decrypted successfully.';
+        $('#dec-meta').textContent = `Size: ${fmtBytes(outBuf.byteLength)} • iters: ${meta?.iters ?? 'n/a'} • compressed: ${!!meta.compressed}`;
+
+      }catch(err){
+        console.error(err); $('#dec-status').textContent = `Error: ${err.message || 'Decryption failed (wrong secret or corrupted file).'}`;
+      }finally{
+        setTimeout(()=>{ $('#dec-progress').style.width='0%'; }, 600);
+        $('#dec-btn').disabled = false;
+        wipe(sftBuf, keyfileBytes);
+      }
+    }
+
+    // ---------- Audio Spectrogram ----------
+    function showAudioPreview(blob){
+      const url = URL.createObjectURL(blob);
+      const audio = document.getElementById('audio-player');
+      const canvas = document.getElementById('spec-canvas');
+      const ui = document.getElementById('audio-ui');
+      ui.classList.remove('hidden');
+      audio.src = url;
+
+      const ctx2d = canvas.getContext('2d');
+      const dpr = window.devicePixelRatio || 1;
+      const cssW = canvas.clientWidth; const cssH = canvas.clientHeight;
+      canvas.width = Math.floor(cssW * dpr); canvas.height = Math.floor(cssH * dpr);
+
+      const actx = new (window.AudioContext || window.webkitAudioContext)();
+      const src = actx.createMediaElementSource(audio);
+      const analyser = actx.createAnalyser();
+      analyser.fftSize = 1024; // resolution
+      const bufferLen = analyser.frequencyBinCount; // 512
+      const data = new Uint8Array(bufferLen);
+      src.connect(analyser); analyser.connect(actx.destination);
+
+      const w = 2 * dpr; // column width
+      function draw(){
+        requestAnimationFrame(draw);
+        analyser.getByteFrequencyData(data);
+        // scroll left
+        ctx2d.drawImage(canvas, w, 0, canvas.width - w, canvas.height, 0, 0, canvas.width - w, canvas.height);
+        // draw new column at right
+        for(let y=0; y<bufferLen; y++){
+          const v = data[y]; // 0..255
+          const hue = 260 - (y/bufferLen)*260; // purple→blue→cyan
+          const light = 15 + (v/255)*55; // 15%..70%
+          ctx2d.fillStyle = `hsl(${hue} 90% ${light}%)`;
+          const yy = Math.floor((1 - y/bufferLen) * canvas.height);
+          ctx2d.fillRect(canvas.width - w, yy, w, Math.ceil(canvas.height/bufferLen)+1);
+        }
+      }
+      draw();
+
+      audio.addEventListener('play', ()=>{ if(actx.state !== 'running') actx.resume(); });
+    }
+
+    // ---------------------- Events ----------------------
+    $('#enc-btn').addEventListener('click', encryptFile);
+    $('#dec-btn').addEventListener('click', decryptFile);
+
+    function activateTab(name){
+      const isEnc = name==='encrypt';
+      $('#panel-encrypt').classList.toggle('hidden', !isEnc);
+      $('#panel-decrypt').classList.toggle('hidden', isEnc);
+      $('#tab-encrypt').classList.toggle('bg-blue-500/20', isEnc);
+      $('#tab-encrypt').classList.toggle('border-blue-400/30', isEnc);
+      $('#tab-decrypt').classList.toggle('bg-emerald-500/20', !isEnc);
+      $('#tab-decrypt').classList.toggle('border-emerald-400/30', !isEnc);
+    }
+    $('#tab-encrypt').addEventListener('click', ()=> activateTab('encrypt'));
+    $('#tab-decrypt').addEventListener('click', ()=> activateTab('decrypt'));
+
+    // Icon render
+    window.addEventListener('DOMContentLoaded', ()=>{ if(window.lucide) lucide.createIcons(); });
+
+    // ---------- QR: header JSON only ----------
+    let lastHeaderJSON = null;
+    function makeQR(str){
+      const wrap = document.getElementById('qr-wrap');
+      wrap.innerHTML = '';
+      new QRCode(wrap, {text: str, width: 220, height: 220, correctLevel: QRCode.CorrectLevel.M});
+      return wrap.querySelector('canvas');
+    }
+    function enableQRButtons(){
+      const btn = document.getElementById('btn-qr-dl');
+      if(btn) btn.disabled = false;
+    }
+    function downloadCanvasPNG(cv, name){
+      const a = document.createElement('a');
+      a.href = cv.toDataURL('image/png');
+      a.download = (name || 'sft-header') + '.qr.png';
+      a.click();
+    }
+
+    document.addEventListener('click', (e)=>{
+      if(e.target.closest && e.target.closest('#btn-qr')){
+        const wrap = document.getElementById('qr-wrap');
+        if(!lastHeaderJSON){ return; }
+        const cv = makeQR(lastHeaderJSON);
+        wrap.classList.remove('hidden');
+        enableQRButtons();
+      }
+      if(e.target.closest && e.target.closest('#btn-qr-dl')){
+        const cv = document.querySelector('#qr-wrap canvas');
+        if(cv) downloadCanvasPNG(cv, 'sft-header');
+      }
+    });
+
+    // ---------- QR Scanner (jsQR) for Decrypt ----------
+    let _qrStream = null; let _qrRaf = 0; window._scannedHeader = null;
+    async function startHeaderQRScan(){
+      const modal = document.getElementById('qr-scan-modal');
+      const video = document.getElementById('qr-video');
+      const canvas = document.getElementById('qr-canvas');
+      const ctx = canvas.getContext('2d');
+      modal.classList.remove('hidden');
+      try{
+        _qrStream = await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}});
+        video.srcObject = _qrStream; await video.play();
+      }catch(err){ modal.classList.add('hidden'); alert('Camera error: '+(err.message||err)); return; }
+      (function loop(){
+        _qrRaf = requestAnimationFrame(loop);
+        if(video.readyState !== video.HAVE_ENOUGH_DATA) return;
+        canvas.width = video.videoWidth; canvas.height = video.videoHeight;
+        ctx.drawImage(video,0,0,canvas.width,canvas.height);
+        const img = ctx.getImageData(0,0,canvas.width,canvas.height);
+        const res = window.jsQR ? jsQR(img.data, img.width, img.height, { inversionAttempts:'dontInvert' }) : null;
+        if(res && res.data){
+          try{
+            const obj = JSON.parse(res.data);
+            if(obj && obj.saltB64 && obj.ivB64){
+              window._scannedHeader = obj;
+              stopHeaderQRScan();
+              const details = `Header verified ✅ • AES-256-GCM • iters: ${obj.iters} • compressed: ${!!obj.compressed} • keyfile: ${!!obj.usesKeyfile}`;
+              document.getElementById('dec-status').textContent = details;
+              document.getElementById('dec-meta').textContent = `salt: ${obj.saltB64.slice(0,8)}… • iv: ${obj.ivB64.slice(0,8)}…`;
+            }
+          }catch(_){/* ignore non-JSON */}
+        }
+      })();
+    }
+    function stopHeaderQRScan(){
+      cancelAnimationFrame(_qrRaf); _qrRaf = 0;
+      const modal = document.getElementById('qr-scan-modal'); modal.classList.add('hidden');
+      const video = document.getElementById('qr-video');
+      if(video && video.srcObject){ video.pause(); video.srcObject.getTracks().forEach(t=>t.stop()); video.srcObject=null; }
+    }
+    // Wire buttons
+    const _scanBtn = document.getElementById('btn-scan-qr-decrypt'); if(_scanBtn) _scanBtn.addEventListener('click', startHeaderQRScan);
+    const _scanClose = document.getElementById('qr-close'); if(_scanClose) _scanClose.addEventListener('click', stopHeaderQRScan);
+
+    // ---------------------- Self Tests ----------------------
+    // These run once after load; see results in DevTools console.
+    async function _encryptBytesForTest(buf, password){
+      const salt = crypto.getRandomValues(new Uint8Array(16));
+      const iv   = crypto.getRandomValues(new Uint8Array(12));
+      const baseKey = await mixKeyMaterial(password, null);
+      const key  = await deriveKey(baseKey, salt, 120000);
+      const header = { v:2, format:'SFT2', algo:'AES-256-GCM', kdf:'PBKDF2-SHA-256', iters:120000, saltB64:toB64(salt), ivB64:toB64(iv), size: buf.byteLength, compressed:false, usesKeyfile:false };
+      const headerBytes = enc.encode(JSON.stringify(header));
+      const ct = await crypto.subtle.encrypt({name:'AES-GCM', iv, additionalData: headerBytes}, key, buf);
+      const out = new Uint8Array(4 + 4 + headerBytes.length + ct.byteLength);
+      out.set(enc.encode('SFT2'), 0); out.set(u32be(headerBytes.length), 4); out.set(headerBytes, 8); out.set(new Uint8Array(ct), 8 + headerBytes.length);
+      return out.buffer;
+    }
+    async function _decryptBytesForTest(sftBuf, password){
+      const view = new DataView(sftBuf);
+      const magic = dec.decode(new Uint8Array(sftBuf.slice(0,4)));
+      if(magic!=='SFT2') throw new Error('bad magic');
+      const headerLen = readU32be(view, 4);
+      const headerBytes = new Uint8Array(sftBuf.slice(8, 8 + headerLen));
+      const meta = JSON.parse(dec.decode(headerBytes));
+      const salt = new Uint8Array(fromB64(meta.saltB64));
+      const iv = new Uint8Array(fromB64(meta.ivB64));
+      const ct = sftBuf.slice(8 + headerLen);
+      const baseKey = await mixKeyMaterial(password, null);
+      const key = await deriveKey(baseKey, salt, meta.iters);
+      const pt = await crypto.subtle.decrypt({name:'AES-GCM', iv, additionalData: headerBytes}, key, ct);
+      return new Uint8Array(pt);
+    }
+    (async()=>{
+      try{
+        const sample = new Uint8Array(256); for(let i=0;i<256;i++) sample[i]=i;
+        const sft = await _encryptBytesForTest(sample, 'test-password');
+        const back = await _decryptBytesForTest(sft, 'test-password');
+        console.assert(back.length===sample.length && back.every((v,i)=>v===sample[i]), 'SelfTest: encrypt/decrypt roundtrip failed');
+        console.log('%cSelfTest: OK — roundtrip success','color:#10b981');
+      }catch(e){ console.error('SelfTest failed', e); }
+    })();
+  </script>
+  <!-- QR Scan Modal -->
+  <div id="qr-scan-modal" class="fixed inset-0 bg-black/70 hidden items-center justify-center z-50">
+    <div class="bg-slate-900 p-4 rounded-2xl border border-white/10 w-[90%] max-w-sm">
+      <div class="flex items-center justify-between mb-2">
+        <h3 class="text-sm font-semibold">Scan Header QR</h3>
+        <button id="qr-close" class="text-slate-300 hover:text-white text-xl leading-none">×</button>
+      </div>
+      <video id="qr-video" class="w-full rounded mb-3" playsinline muted></video>
+      <canvas id="qr-canvas" class="hidden"></canvas>
+      <p class="text-[11px] text-slate-500">Point your camera at the QR. We read JSON only (no password).</p>
+    </div>
+  </div>
+  </div>
+
+</body>
+</html>
